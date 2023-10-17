@@ -243,8 +243,8 @@ def RPC_compute_loss_partial(
 
 
 def RPC_run_validation(
-        df: pd.DataFrame, model: LogisticRegression, predictors: list,
-        outcome: str
+        df: pd.DataFrame, paramaters: list, classes: list,
+        predictors: list, outcome: str
 ) -> dict:
     """ Method for running model validation
 
@@ -252,8 +252,10 @@ def RPC_run_validation(
     ----------
     df
         DataFrame with input data
-    model
-        Logistic regression model object
+    paramaters
+        List with coefficients
+    classes
+        Classes to be predicted
     predictors
         List with columns to be used as predictors
     outcome
@@ -270,6 +272,12 @@ def RPC_run_validation(
     # Get features and outcomes
     X = df[predictors].values
     y = df[outcome].values
+
+    # Logistic regression model
+    model = LogisticRegression()
+    model.coef_ = np.array(paramaters[1])
+    model.intercept_ = np.array(paramaters[0])
+    model.classes_ = np.array(classes)
 
     # Compute model accuracy
     score = model.score(X, y)
