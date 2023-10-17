@@ -51,8 +51,8 @@ master_task = client.create_new_task(
         'master': False,
         'method': 'run_validation',
         'kwargs': {
-            'model': [model.intercept_.tolist(), model.coef_.tolist()],
-            'classes': [0, 1],
+            'parameters': [model.intercept_.tolist(), model.coef_.tolist()],
+            'classes': ['alive', 'dead'],
             'predictors': ['t', 'n', 'm'],
             'outcome': 'vital_status',
         }
