@@ -11,6 +11,7 @@ import pandas as pd
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
+from sklearn.metrics import confusion_matrix
 from vantage6.tools.util import info
 
 from v6_logistic_regression_py.helper import coordinate_task
@@ -236,6 +237,52 @@ def RPC_compute_loss_partial(
     results = {
         'loss': loss,
         'size': X.shape[0]
+    }
+
+    return results
+
+
+def RPC_run_validation(
+        df: pd.DataFrame, model: LogisticRegression, predictors: list,
+        outcome: str
+) -> dict:
+    """ Method for running model validation
+
+    Parameters
+    ----------
+    df
+        DataFrame with input data
+    model
+        Logistic regression model object
+    predictors
+        List with columns to be used as predictors
+    outcome
+        Column to be used as outcome
+
+    Returns
+    -------
+    performance
+        Dictionary with performance metrics
+    """
+    # Drop rows with NaNs
+    df = df.dropna(how='any')
+
+    # Get features and outcomes
+    X = df[predictors].values
+    y = df[outcome].values
+
+    # Compute model accuracy
+    score = model.score(X, y)
+
+    # Confusion matrix
+    cm = confusion_matrix(
+        y, model.predict(X), labels=model.classes_
+    )
+
+    # Results
+    results = {
+        'score': score,
+        'confusion_matrix': cm
     }
 
     return results

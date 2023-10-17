@@ -44,3 +44,22 @@ model = results[0]['model']
 iteration = results[0]['iteration']
 print(model.coef_, model.intercept_)
 print(f'Number of iterations: {iteration}')
+
+# Check validation method
+master_task = client.create_new_task(
+    input_={
+        'master': False,
+        'method': 'run_validation',
+        'kwargs': {
+            'model': model,
+            'predictors': ['t', 'n', 'm'],
+            'outcome': 'vital_status',
+        }
+    },
+    organization_ids=[0]
+)
+results = client.get_results(master_task.get('id'))
+accuracy = results[0]['score']
+cm = results[0]['confusion_matrix']
+print(f'Accuracy: {accuracy}')
+print(f'Confusion matrix: {cm}')
