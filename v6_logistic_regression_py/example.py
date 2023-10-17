@@ -3,8 +3,6 @@
 """ Sample code to test the federated algorithm with a mock client
 """
 import os
-import numpy as np
-from sklearn.linear_model import LogisticRegression
 from vantage6.tools.mock_client import ClientMockProtocol
 
 

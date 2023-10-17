@@ -67,6 +67,7 @@ def master(
     # The next steps are run until the maximum number of iterations or
     # convergence is reached
     iteration = 0
+    loss = None
     loss_diff = 2*delta
     while (iteration < max_iter) and (loss_diff > delta):
         # The input for the partial algorithm

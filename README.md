@@ -29,6 +29,7 @@ input_ = {
         'org_ids': [2, 3],          # organisations to run algorithm
         'predictors': ['c1', 'c2'], # columns to be used as predictors
         'outcome': 'outcome',       # column to be used as outcome
+        'classes': [0, 1],          # classes to be predicted
         'max_iter': 15,             # maximum number of iterations to perform
         'delta': 0.01,              # threshold loss difference for convergence
     }
