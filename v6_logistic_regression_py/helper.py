@@ -56,8 +56,9 @@ def coordinate_task(client, input: dict, ids: list) -> list:
     return results
 
 
-def set_initial_params(model: LogisticRegression, ncoef):
+def set_initial_params(model: LogisticRegression, ncoef, classes):
     """Sets initial parameters as zeros"""
+    model.classes_ = np.array(classes)
     model.coef_ = np.zeros((1, ncoef))
     if model.fit_intercept:
         model.intercept_ = np.zeros((1,))

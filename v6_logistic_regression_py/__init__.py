@@ -4,17 +4,15 @@
 Adapted from:
 https://flower.dev/blog/2021-07-21-federated-scikit-learn-using-flower/
 """
-import re
 import warnings
 
 import numpy as np
 import pandas as pd
 
-from pandas.api.types import is_string_dtype
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from vantage6.tools.util import info
+
 from v6_logistic_regression_py.helper import coordinate_task
 from v6_logistic_regression_py.helper import set_initial_params
 from v6_logistic_regression_py.helper import set_model_params
@@ -23,7 +21,8 @@ from v6_logistic_regression_py.helper import get_model_parameters
 
 def master(
         client, data: pd.DataFrame, predictors: list, outcome: str,
-        max_iter: int = 15, delta: float = 0.01, org_ids: list = None
+        classes: list, max_iter: int = 15, delta: float = 0.01,
+        org_ids: list = None
 ) -> dict:
     """ Master algorithm that coordinates the tasks and performs averaging
 
@@ -37,6 +36,8 @@ def master(
         List with columns to be used as predictors
     outcome
         Column to be used as outcome
+    classes
+        List with classes to be predicted
     max_iter
         Maximum number of iterations to perform
     delta
@@ -60,13 +61,14 @@ def master(
     # Initialise the weights for the logistic regression
     info('Initializing logistic regression weights')
     model = LogisticRegression()
-    model = set_initial_params(model, len(predictors))
+    model = set_initial_params(model, len(predictors), classes)
     parameters = get_model_parameters(model)
 
-    # TODO: check convergence by looking at the losses
-    # The next steps are run until the maximum number of iterations is reached
+    # The next steps are run until the maximum number of iterations or
+    # convergence is reached
     iteration = 0
-    while iteration < max_iter:
+    loss_diff = 2*delta
+    while (iteration < max_iter) and (loss_diff > delta):
         # The input for the partial algorithm
         info('Defining input parameters')
         input_ = {
@@ -99,34 +101,57 @@ def master(
         ])
         intercept = np.array([intercept])
 
-        # # TODO: how to average losses and accuracy?
-        # # Average loss and accuracy with weighted average
-        # loss = np.sum([
-        #     result['loss']*result['size'] for result in results
-        # ]) / np.sum([
-        #     result['size'] for result in results
-        # ])
-        # accuracy = np.sum([
-        #     result['accuracy']*result['size'] for result in results
-        # ]) / np.sum([
-        #     result['size'] for result in results
-        # ])
-
-        # Re-define the global parameters and update iterations counter
+        # Re-define the global parameters
         parameters = (coefficients, intercept)
         model = set_model_params(model, parameters)
+
+        # The input for the partial algorithm that computes the loss
+        info('Computing local losses')
+        input_ = {
+            'method': 'compute_loss_partial',
+            'kwargs': {
+                'model': model,
+                'predictors': predictors,
+                'outcome': outcome
+            }
+        }
+
+        # Send partial task and collect results
+        results = coordinate_task(client, input_, ids)
+        info(f'Results: {results}')
+
+        # Aggregating local losses into a global loss
+        info('Run global averaging for losses')
+        new_loss = np.sum([
+            result['loss']*result['size'] for result in results
+        ]) / np.sum([
+            result['size'] for result in results
+        ])
+
+        # Check convergence: we assume convergence when the difference in the
+        # global loss between iterations gets below a certain threshold,
+        # the difference is set to a value greater than delta in iteration zero
+        info('Checking convergence')
+        loss_diff = np.abs(loss - new_loss) if iteration != 0 else 2*delta
+        loss = new_loss
+        info(f'Difference is loss = {loss_diff}')
+
+        # Update iterations counter
         iteration += 1
 
-    return {
-        'model': model
-        # 'loss': loss,
-        # 'accuracy': accuracy
+    # Final result
+    result = {
+        'model': model,
+        'loss': loss,
+        'iteration': iteration
     }
+
+    return result
 
 
 def RPC_logistic_regression_partial(
         df: pd.DataFrame, parameters, predictors, outcome
-) -> list:
+) -> dict:
     """ Partial method for federated logistic regression
 
     Parameters
@@ -143,7 +168,7 @@ def RPC_logistic_regression_partial(
     Returns
     -------
     results
-        Dictionary with local model, loss and accuracy
+        Dictionary with local model
     """
     # Drop rows with NaNs
     df = df.dropna(how='any')
@@ -154,7 +179,6 @@ def RPC_logistic_regression_partial(
 
     # Create LogisticRegression Model
     model = LogisticRegression(
-        penalty='l2',
         max_iter=1,       # local epoch
         warm_start=True,  # prevent refreshing weights when fitting
     )
@@ -167,15 +191,49 @@ def RPC_logistic_regression_partial(
         model.fit(X, y)
         info('Training round finished')
 
-    # # Evaluate model
-    # loss = log_loss(y_test, model.predict_proba(X_test))
-    # accuracy = model.score(X_test, y_test)
-
     # Results
     results = {
         'model': model,
-        # 'loss': loss,
-        # 'accuracy': accuracy,
+        'size': X.shape[0]
+    }
+
+    return results
+
+
+def RPC_compute_loss_partial(
+        df: pd.DataFrame, model, predictors, outcome
+) -> dict:
+    """ Partial method for calculation of loss
+
+    Parameters
+    ----------
+    df
+        DataFrame with input data
+    model
+        Logistic regression model object
+    predictors
+        List with columns to be used as predictors
+    outcome
+        Column to be used as outcome
+
+    Returns
+    -------
+    loss
+        Dictionary with local loss
+    """
+    # Drop rows with NaNs
+    df = df.dropna(how='any')
+
+    # Get features and outcomes
+    X = df[predictors].values
+    y = df[outcome].values
+
+    # Compute loss
+    loss = log_loss(y, model.predict_proba(X))
+
+    # Results
+    results = {
+        'loss': loss,
         'size': X.shape[0]
     }
 

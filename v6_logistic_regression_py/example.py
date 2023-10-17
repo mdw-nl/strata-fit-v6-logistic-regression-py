@@ -34,12 +34,15 @@ master_task = client.create_new_task(
             'org_ids': [0, 1],
             'predictors': ['t', 'n', 'm'],
             'outcome': 'vital_status',
-            'max_iter': 5,
-            'delta': 0.01
+            'classes': ['alive', 'dead'],
+            'max_iter': 100,
+            'delta': 0.0001
         }
     },
     organization_ids=[0, 1]
 )
 results = client.get_results(master_task.get('id'))
 model = results[0]['model']
+iteration = results[0]['iteration']
 print(model.coef_, model.intercept_)
+print(f'Number of iterations: {iteration}')
