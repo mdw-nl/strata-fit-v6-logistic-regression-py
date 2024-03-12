@@ -21,6 +21,9 @@ from v6_logistic_regression_py.helper import coordinate_task
 from v6_logistic_regression_py.helper import set_initial_params
 from v6_logistic_regression_py.helper import set_model_params
 from v6_logistic_regression_py.helper import get_model_parameters
+from v6_logistic_regression_py.helper import init_model, export_model
+
+MODEL_ATTRIBUTE_KEYS = ["coef_", "intercept_", ]
 
 @algorithm_client
 def master(
@@ -202,6 +205,8 @@ def logistic_regression_partial(
         warnings.simplefilter('ignore')
         model.fit(X, y)
         info('Training round finished')
+    
+    model_dict = export_model(model, attribute_keys=[])
 
     # Results
     results = {
@@ -292,10 +297,18 @@ def run_validation(
     y = df[outcome].values
 
     # Logistic regression model
-    model = LogisticRegression()
-    model.coef_ = np.array(parameters[1])
-    model.intercept_ = np.array(parameters[0])
-    model.classes_ = np.array(classes)
+    model = init_model(
+        LogisticRegression,
+        model_attributes=dict(
+            intercept_ = np.array(parameters[0]),
+            coef_ = np.array(parameters[1]),
+            classes_ = np.array(classes)
+            )
+        )
+    # model = LogisticRegression()
+    # model.coef_ = np.array(parameters[1])
+    # model.intercept_ = np.array(parameters[0])
+    # model.classes_ = np.array(classes)
 
     # Compute model accuracy
     score = model.score(X, y)
