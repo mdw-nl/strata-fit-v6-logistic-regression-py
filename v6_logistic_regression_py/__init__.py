@@ -12,18 +12,25 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from sklearn.metrics import confusion_matrix
-from vantage6.tools.util import info
+from typing import List
+from vantage6.algorithm.client import AlgorithmClient
+from vantage6.algorithm.tools.util import info
+from vantage6.algorithm.tools.decorators import algorithm_client, data
 
 from v6_logistic_regression_py.helper import coordinate_task
 from v6_logistic_regression_py.helper import set_initial_params
 from v6_logistic_regression_py.helper import set_model_params
 from v6_logistic_regression_py.helper import get_model_parameters
 
-
+@algorithm_client
 def master(
-        client, data: pd.DataFrame, predictors: list, outcome: str,
-        classes: list, max_iter: int = 15, delta: float = 0.01,
-        org_ids: list = None
+        client: AlgorithmClient,
+        predictors: List[str],
+        outcome: str,
+        classes: list,
+        max_iter: int = 15,
+        delta: float = 0.01,
+        org_ids: List[int] = None
 ) -> dict:
     """ Master algorithm that coordinates the tasks and performs averaging
 
@@ -54,8 +61,8 @@ def master(
 
     # Get all organization ids that are within the collaboration or
     # use the provided ones
-    info('Collecting participating organizations')
-    organizations = client.get_organizations_in_my_collaboration()
+    info('Collecting the identification of the participating organizations')
+    organizations = client.organization.list()
     ids = [organization.get('id') for organization in organizations
            if not org_ids or organization.get('id') in org_ids]
 
@@ -150,9 +157,12 @@ def master(
 
     return result
 
-
-def RPC_logistic_regression_partial(
-        df: pd.DataFrame, parameters, predictors, outcome
+@data(1)
+def logistic_regression_partial(
+        df: pd.DataFrame,
+        parameters,
+        predictors,
+        outcome
 ) -> dict:
     """ Partial method for federated logistic regression
 
@@ -202,8 +212,12 @@ def RPC_logistic_regression_partial(
     return results
 
 
-def RPC_compute_loss_partial(
-        df: pd.DataFrame, model, predictors, outcome
+@data(1)
+def compute_loss_partial(
+        df: pd.DataFrame,
+        model,
+        predictors,
+        outcome
 ) -> dict:
     """ Partial method for calculation of loss
 
@@ -242,9 +256,13 @@ def RPC_compute_loss_partial(
     return results
 
 
-def RPC_run_validation(
-        df: pd.DataFrame, parameters: list, classes: list,
-        predictors: list, outcome: str
+@data(1)
+def run_validation(
+        df: pd.DataFrame,
+        parameters: list,
+        classes: list,
+        predictors: list,
+        outcome: str
 ) -> dict:
     """ Method for running model validation
 

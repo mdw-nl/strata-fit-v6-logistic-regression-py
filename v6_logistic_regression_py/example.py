@@ -3,28 +3,27 @@
 """ Sample code to test the federated algorithm with a mock client
 """
 import os
-from vantage6.tools.mock_client import ClientMockProtocol
+from pathlib import Path
+from vantage6.algorithm.tools.mock_client import MockAlgorithmClient
 
 
 # Start mock client
-data_dir = os.path.join(
-    os.getcwd(), 'v6_logistic_regression_py', 'local'
-)
-client = ClientMockProtocol(
-    datasets=[
-        os.path.join(data_dir, 'data1.csv'),
-        os.path.join(data_dir, 'data2.csv')
-    ],
+data_directory = Path('./v6_logistic_regression_py') / 'local'
+dataset_1 = {"database": data_directory / "data1.csv", "db_type": "csv"}
+dataset_2 = {"database": data_directory / "data2.csv", "db_type": "csv"}
+
+client = MockAlgorithmClient(
+    datasets=[[dataset_1], [dataset_2]],
     module='v6_logistic_regression_py'
 )
 
 # Get mock organisations
-organizations = client.get_organizations_in_my_collaboration()
+organizations = client.organization.list()
 print(organizations)
 ids = [organization['id'] for organization in organizations]
 
 # Check master method
-master_task = client.create_new_task(
+master_task = client.task.create(
     input_={
         'master': True,
         'method': 'master',
@@ -37,7 +36,7 @@ master_task = client.create_new_task(
             'delta': 0.0001
         }
     },
-    organization_ids=[0, 1]
+    organizations=[0, 1]
 )
 results = client.get_results(master_task.get('id'))
 model = results[0]['model']
@@ -46,7 +45,7 @@ print(model.coef_, model.intercept_)
 print(f'Number of iterations: {iteration}')
 
 # Check validation method
-master_task = client.create_new_task(
+master_task = client.task.create(
     input_={
         'master': False,
         'method': 'run_validation',
@@ -57,7 +56,7 @@ master_task = client.create_new_task(
             'outcome': 'vital_status',
         }
     },
-    organization_ids=[0]
+    organizations=[0]
 )
 results = client.get_results(master_task.get('id'))
 accuracy = results[0]['score']

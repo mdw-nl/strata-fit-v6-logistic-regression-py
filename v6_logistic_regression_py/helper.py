@@ -7,14 +7,15 @@ import time
 import numpy as np
 
 from sklearn.linear_model import LogisticRegression
-from vantage6.tools.util import info
+from vantage6.algorithm.client import AlgorithmClient
+from vantage6.algorithm.tools.util import info
 from typing import Tuple, Union
 
 XY = Tuple[np.ndarray, np.ndarray]
 LogRegParams = Union[XY, Tuple[np.ndarray]]
 
 
-def coordinate_task(client, input: dict, ids: list) -> list:
+def coordinate_task(client: AlgorithmClient, input: dict, ids: list) -> list:
     """ Coordinate tasks to be sent to data nodes, which includes dispatching
     the task, waiting for results to return and collect completed results
 
@@ -35,9 +36,9 @@ def coordinate_task(client, input: dict, ids: list) -> list:
 
     # Create a new task for the desired organizations
     info('Dispatching node tasks')
-    task = client.create_new_task(
+    task = client.task.create(
         input_=input,
-        organization_ids=ids
+        organizations=ids
     )
 
     # Wait for nodes to return results
