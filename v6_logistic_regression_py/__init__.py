@@ -12,18 +12,20 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from sklearn.metrics import confusion_matrix
-from typing import List
+from typing import Dict, List
 from vantage6.algorithm.client import AlgorithmClient
 from vantage6.algorithm.tools.util import info
 from vantage6.algorithm.tools.decorators import algorithm_client, data
 
 from v6_logistic_regression_py.helper import coordinate_task
-from v6_logistic_regression_py.helper import set_initial_params
-from v6_logistic_regression_py.helper import set_model_params
-from v6_logistic_regression_py.helper import get_model_parameters
-from v6_logistic_regression_py.helper import init_model, export_model
+from v6_logistic_regression_py.helper import (
+    aggregate,
+    export_model,
+    initialize_model,
+)
 
-MODEL_ATTRIBUTE_KEYS = ["coef_", "intercept_", ]
+MODEL_ATTRIBUTE_KEYS = ["coef_", "intercept_", "classes_"]
+MODEL_AGGREGATION_KEYS = ["coef_", "intercept_"]
 
 @algorithm_client
 def master(
@@ -70,10 +72,15 @@ def master(
            if not org_ids or organization.get('id') in org_ids]
 
     # Initialise the weights for the logistic regression
-    info('Initializing logistic regression weights')
-    model = LogisticRegression()
-    model = set_initial_params(model, len(predictors), classes)
-    parameters = get_model_parameters(model)
+    info('Initializing logistic regression estimator')
+    model_initial_attributes = dict(
+        classes_  =np.array(classes),
+        coef_     =np.zeros((1, len(predictors))),
+        intercept_=np.zeros((1,))
+    )
+    global_model = initialize_model(LogisticRegression, model_initial_attributes)
+    model_attributes = export_model(global_model, attribute_keys=MODEL_ATTRIBUTE_KEYS)
+    info(model_attributes)
 
     # The next steps are run until the maximum number of iterations or
     # convergence is reached
@@ -82,11 +89,11 @@ def master(
     loss_diff = 2*delta
     while (iteration < max_iter) and (loss_diff > delta):
         # The input for the partial algorithm
-        info('Defining input parameters')
+        info(f'######## ITERATION #{iteration} #########')
         input_ = {
             'method': 'logistic_regression_partial',
             'kwargs': {
-                'parameters': parameters,
+                'model_attributes': model_attributes,
                 'predictors': predictors,
                 'outcome': outcome
             }
@@ -94,35 +101,44 @@ def master(
 
         # Send partial task and collect results
         results = coordinate_task(client, input_, ids)
-        info(f'Results: {results}')
+        info(f'Results before aggregation: {results}')
 
-        # Average model weights with weighted average
-        info('Run global averaging for model weights')
-        coefficients = np.zeros((1, len(predictors)))
-        for i in range(coefficients.shape[1]):
-            coefficients[0, i] = np.sum([
-                result['model'].coef_[0, i]*result['size']
-                for result in results
-            ]) / np.sum([
-                result['size'] for result in results
-            ])
-        intercept = np.sum([
-            result['model'].intercept_*result['size'] for result in results
-        ]) / np.sum([
-            result['size'] for result in results
-        ])
-        intercept = np.array([intercept])
+        # # Reassign model parameters
+        # global_model = update_model(global_model, model_attributes=results['model_attributes'])
+
+        # # Average model weights with weighted average
+        # info(f'Run global averaging for model weights: {results}')
+        # coefficients = np.zeros((1, len(predictors)))
+        # for i in range(coefficients.shape[1]):
+        #     coefficients[0, i] = np.sum([
+        #         result['model'].coef_[0, i]*result['size']
+        #         for result in results
+        #     ]) / np.sum([
+        #         result['size'] for result in results
+        #     ])
+        # intercept = np.sum([
+        #     result['model'].intercept_*result['size'] for result in results
+        # ]) / np.sum([
+        #     result['size'] for result in results
+        # ])
+        # intercept = np.array([intercept])
 
         # Re-define the global parameters
-        parameters = (coefficients, intercept)
-        model = set_model_params(model, parameters)
+        # parameters = (coefficients, intercept)
+        # model = set_model_params(model, parameters)
+
+        # Aggregate the results
+        info("Aggregating partial modeling results")
+        global_model = aggregate(global_model, results=results, aggregation_keys=MODEL_AGGREGATION_KEYS)
+        info("Exporting global model")
+        global_model_attributes = export_model(model=global_model, attribute_keys=MODEL_ATTRIBUTE_KEYS)
 
         # The input for the partial algorithm that computes the loss
         info('Computing local losses')
         input_ = {
             'method': 'compute_loss_partial',
             'kwargs': {
-                'model': model,
+                'model_attributes': global_model_attributes,
                 'predictors': predictors,
                 'outcome': outcome
             }
@@ -151,19 +167,17 @@ def master(
         # Update iterations counter
         iteration += 1
 
-    # Final result
-    result = {
-        'model': model,
+    return {
+        'model_attributes': global_model_attributes,
         'loss': loss,
         'iteration': iteration
     }
 
-    return result
 
 @data(1)
 def logistic_regression_partial(
         df: pd.DataFrame,
-        parameters,
+        model_attributes: Dict[str, List[float]],
         predictors,
         outcome
 ) -> dict:
@@ -173,7 +187,7 @@ def logistic_regression_partial(
     ----------
     df
         DataFrame with input data
-    parameters
+    model_attributes
         Model weigths of logistic regression
     predictors
         List with columns to be used as predictors
@@ -192,35 +206,32 @@ def logistic_regression_partial(
     X = df[predictors].values
     y = df[outcome].values
 
-    # Create LogisticRegression Model
-    model = LogisticRegression(
+    # Create local LogisticRegression estimator object
+    model_kwargs = dict(
         max_iter=1,       # local epoch
         warm_start=True,  # prevent refreshing weights when fitting
     )
-
-    # Fitting local model
-    model = set_model_params(model, parameters)
+    model = initialize_model(LogisticRegression, model_attributes=model_attributes, **model_kwargs)
+    
     # Ignore convergence failure due to low local epochs
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         model.fit(X, y)
         info('Training round finished')
     
-    model_dict = export_model(model, attribute_keys=[])
+    model_attributes = export_model(model, attribute_keys=MODEL_ATTRIBUTE_KEYS)
+    info(f'MODEL ATTRIBUTES: {model_attributes}')
 
-    # Results
-    results = {
-        'model': model,
+    return {
+        'model_attributes': model_attributes,
         'size': X.shape[0]
     }
-
-    return results
 
 
 @data(1)
 def compute_loss_partial(
         df: pd.DataFrame,
-        model,
+        model_attributes: Dict[str, list],
         predictors,
         outcome
 ) -> dict:
@@ -230,8 +241,8 @@ def compute_loss_partial(
     ----------
     df
         DataFrame with input data
-    model
-        Logistic regression model object
+    model_attributes
+        Serializable model parameters in Dict[str, list] format
     predictors
         List with columns to be used as predictors
     outcome
@@ -249,16 +260,16 @@ def compute_loss_partial(
     X = df[predictors].values
     y = df[outcome].values
 
+    # Initialize local model instance
+    model = initialize_model(LogisticRegression, model_attributes)
+
     # Compute loss
     loss = log_loss(y, model.predict_proba(X))
 
-    # Results
-    results = {
+    return {
         'loss': loss,
         'size': X.shape[0]
     }
-
-    return results
 
 
 @data(1)
@@ -296,32 +307,23 @@ def run_validation(
     X = df[predictors].values
     y = df[outcome].values
 
-    # Logistic regression model
-    model = init_model(
-        LogisticRegression,
-        model_attributes=dict(
+    # Initialize LogisticRegression estimator
+    model_attributes=dict(
             intercept_ = np.array(parameters[0]),
             coef_ = np.array(parameters[1]),
             classes_ = np.array(classes)
             )
-        )
-    # model = LogisticRegression()
-    # model.coef_ = np.array(parameters[1])
-    # model.intercept_ = np.array(parameters[0])
-    # model.classes_ = np.array(classes)
+    model = initialize_model(LogisticRegression, model_attributes)
 
     # Compute model accuracy
     score = model.score(X, y)
 
-    # Confusion matrix
-    cm = confusion_matrix(
+    # Compute confusion matrix
+    confusion_matrix_ = confusion_matrix(
         y, model.predict(X), labels=model.classes_
-    )
+    ).tolist()
 
-    # Results
-    results = {
+    return {
         'score': score,
-        'confusion_matrix': cm
+        'confusion_matrix': confusion_matrix_
     }
-
-    return results

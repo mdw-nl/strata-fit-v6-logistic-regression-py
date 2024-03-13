@@ -4,7 +4,10 @@
 """
 import os
 from pathlib import Path
+from sklearn.linear_model import LogisticRegression
 from vantage6.algorithm.tools.mock_client import MockAlgorithmClient
+
+from v6_logistic_regression_py.helper import initialize_model
 
 
 # Start mock client
@@ -19,7 +22,7 @@ client = MockAlgorithmClient(
 
 # Get mock organisations
 organizations = client.organization.list()
-print(organizations)
+print(f"Participating organizations: {organizations}")
 ids = [organization['id'] for organization in organizations]
 
 # Check master method
@@ -32,18 +35,19 @@ master_task = client.task.create(
             'predictors': ['t', 'n', 'm'],
             'outcome': 'vital_status',
             'classes': ['alive', 'dead'],
-            'max_iter': 100,
+            'max_iter': 10,
             'delta': 0.0001
         }
     },
-    organizations=[0, 1]
+    organizations=[0]
 )
-results = client.get_results(master_task.get('id'))
-model = results[0]['model']
-iteration = results[0]['iteration']
+results = client.result.get(master_task.get('id'))
+model = initialize_model(LogisticRegression, results['model_attributes'])#
+iteration = results['iteration']
 print(model.coef_, model.intercept_)
 print(f'Number of iterations: {iteration}')
 
+print([model.intercept_.tolist(), model.coef_.tolist()])
 # Check validation method
 master_task = client.task.create(
     input_={
@@ -58,8 +62,8 @@ master_task = client.task.create(
     },
     organizations=[0]
 )
-results = client.get_results(master_task.get('id'))
-accuracy = results[0]['score']
-cm = results[0]['confusion_matrix']
+results = client.result.get(master_task.get('id'))
+accuracy = results['score']
+cm = results['confusion_matrix']
 print(f'Accuracy: {accuracy}')
 print(f'Confusion matrix: {cm}')
