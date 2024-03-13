@@ -1,8 +1,5 @@
-# -*- coding: utf-8 -*-
-
 """ Sample code to test the federated algorithm with a mock client
 """
-import os
 from pathlib import Path
 from sklearn.linear_model import LogisticRegression
 from vantage6.algorithm.tools.mock_client import MockAlgorithmClient
