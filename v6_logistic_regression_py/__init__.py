@@ -95,7 +95,7 @@ def master(
 
         # Aggregating updates into the global model and assessing convergence.
         global_model = aggregate(global_model, partial_results, MODEL_AGGREGATION_KEYS)
-        new_loss = compute_global_loss(client, global_model, predictors, outcome, ids)
+        new_loss = compute_global_loss(client, global_model, predictors, outcome, ids, trash_kwargs)
         
         loss_diff = abs(loss - new_loss) if loss is not None else 2 * delta
         loss = new_loss
