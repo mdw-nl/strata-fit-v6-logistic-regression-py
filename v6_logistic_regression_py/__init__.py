@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-
-""" Federated algorithm for logistic regression
-Adapted from:
+""" Federated logistic regression algorithm adapted from Flower's federated scikit-learn example:
 https://flower.dev/blog/2021-07-21-federated-scikit-learn-using-flower/
 """
 import warnings
@@ -12,58 +9,170 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from sklearn.metrics import confusion_matrix
-from vantage6.tools.util import info
+from typing import Any, Dict, List
+from vantage6.algorithm.client import AlgorithmClient
+from vantage6.algorithm.tools.util import info
+from vantage6.algorithm.tools.decorators import algorithm_client, data
 
-from v6_logistic_regression_py.helper import coordinate_task
-from v6_logistic_regression_py.helper import set_initial_params
-from v6_logistic_regression_py.helper import set_model_params
-from v6_logistic_regression_py.helper import get_model_parameters
+from v6_logistic_regression_py.helper import (
+    aggregate,
+    coordinate_task,
+    export_model,
+    initialize_model
+)
 
-
+MODEL_ATTRIBUTE_KEYS = ["coef_", "intercept_", "classes_"]
+MODEL_AGGREGATION_KEYS = ["coef_", "intercept_"]
+@algorithm_client
 def master(
-        client, data: pd.DataFrame, predictors: list, outcome: str,
-        classes: list, max_iter: int = 15, delta: float = 0.01,
-        org_ids: list = None
-) -> dict:
-    """ Master algorithm that coordinates the tasks and performs averaging
+    client: AlgorithmClient,
+    predictors: List[str],
+    outcome: str,
+    classes: List[str],
+    max_iter: int = 15,
+    delta: float = 0.01,
+    org_ids: List[int] = None
+) -> Dict[str, Any]:
+    """
+    Orchestrates federated logistic regression training across nodes.
 
     Parameters
     ----------
-    client
-        Vantage6 user or mock client
-    data
-        DataFrame with the input data
-    predictors
-        List with columns to be used as predictors
-    outcome
-        Column to be used as outcome
-    classes
-        List with classes to be predicted
-    max_iter
-        Maximum number of iterations to perform
-    delta
-        Threshold for difference between losses to consider convergence
-    org_ids
-        List with organisation ids to be used
+    client : AlgorithmClient
+        Vantage6 user or mock client.
+    predictors : List[str]
+        Columns to be used as predictors.
+    outcome : str
+        Column to be used as target variable.
+    classes : List[str]
+        List of class labels.
+    max_iter : int, optional
+        Maximum number of iterations for convergence.
+    delta : float, optional
+        Convergence threshold based on loss difference.
+    org_ids : List[int], optional
+        Specific organization IDs to involve in computation.
 
     Returns
     -------
-    results
-        Dictionary with the final averaged result
+    Dict[str, any]
+        Aggregated model attributes, last loss value, and number of iterations performed.
+    """
+
+    # Identifying data nodes participating in the federated learning process.
+    info("Identifying participating organizations.")
+    organizations = client.organization.list()
+    ids = [org['id'] for org in organizations if not org_ids or org['id'] in org_ids]
+
+    # Initializing the global logistic regression model with zero weights.
+    info("Initializing global logistic regression model.")
+    model_attrs = {
+        'classes_': np.array(classes),
+        'coef_': np.zeros((1, len(predictors))),
+        'intercept_': np.zeros(1)
+    }
+    global_model = initialize_model(LogisticRegression, model_attrs)
+
+    # Iteratively updating the global model based on local updates until convergence.
+    iteration, loss, loss_diff = 0, None, 2 * delta
+    while iteration < max_iter and loss_diff > delta:
+        info(f"Starting iteration #{iteration + 1}.")
+
+        # Sending model training tasks to nodes and collecting updates.
+        model_attrs = export_model(global_model, MODEL_ATTRIBUTE_KEYS)
+        input_ = {
+            'method': 'logistic_regression_partial',
+            'kwargs': {'model_attributes': model_attrs, 'predictors': predictors, 'outcome': outcome}
+            }
+        partial_results = coordinate_task(client, input_, ids)
+
+        # Aggregating updates into the global model and assessing convergence.
+        global_model = aggregate(global_model, partial_results, MODEL_AGGREGATION_KEYS)
+        new_loss = compute_global_loss(client, global_model, predictors, outcome, ids)
+        
+        loss_diff = abs(loss - new_loss) if loss is not None else 2 * delta
+        loss = new_loss
+        info(f"Iteration #{iteration + 1} completed. Loss difference: {loss_diff}.")
+
+        iteration += 1
+
+    info("Federated training completed.")
+
+    return {
+        'model_attributes': export_model(global_model, MODEL_ATTRIBUTE_KEYS),
+        'loss': loss,
+        'iteration': iteration
+    }
+
+def compute_global_loss(client, model, predictors, outcome, ids):
+    """
+    Helper function to compute global loss, abstracting detailed logging.
+    """
+    model_attributes = export_model(model, MODEL_ATTRIBUTE_KEYS)
+    input_ = {
+        'method': 'compute_loss_partial',
+        'kwargs': {'model_attributes': model_attributes, 'predictors': predictors, 'outcome': outcome}
+        }
+    results = coordinate_task(client, input_, ids)
+    aggregated_sample_size = np.sum([res['size'] for res in results])
+    aggregated_loss = np.sum([res['loss'] * res['size'] for res in results])
+    new_loss = aggregated_loss / aggregated_sample_size
+    return new_loss
+
+
+@algorithm_client
+def master(
+    client: AlgorithmClient,
+    predictors: List[str],
+    outcome: str,
+    classes: List[str],
+    max_iter: int = 15,
+    delta: float = 0.01,
+    org_ids: List[int] = None
+) -> Dict[str, any]:
+    """
+    Coordinates federated logistic regression training across nodes.
+
+    Parameters
+    ----------
+    client : AlgorithmClient
+        Vantage6 user or mock client.
+    predictors : List[str]
+        Columns to be used as predictors.
+    outcome : str
+        Column to be used as target variable.
+    classes : List[str]
+        List of class labels.
+    max_iter : int, optional
+        Maximum number of iterations for convergence.
+    delta : float, optional
+        Convergence threshold based on loss difference.
+    org_ids : List[int], optional
+        Specific organization IDs to involve in computation.
+
+    Returns
+    -------
+    Dict[str, any]
+        Aggregated model attributes, last loss value, and number of iterations performed.
     """
 
     # Get all organization ids that are within the collaboration or
     # use the provided ones
-    info('Collecting participating organizations')
-    organizations = client.get_organizations_in_my_collaboration()
+    info('Collecting the identification of the participating organizations')
+    organizations = client.organization.list()
     ids = [organization.get('id') for organization in organizations
            if not org_ids or organization.get('id') in org_ids]
 
     # Initialise the weights for the logistic regression
-    info('Initializing logistic regression weights')
-    model = LogisticRegression()
-    model = set_initial_params(model, len(predictors), classes)
-    parameters = get_model_parameters(model)
+    info('Initializing logistic regression estimator')
+    model_initial_attributes = dict(
+        classes_  =np.array(classes),
+        coef_     =np.zeros((1, len(predictors))),
+        intercept_=np.zeros((1,))
+    )
+    global_model = initialize_model(LogisticRegression, model_initial_attributes)
+    model_attributes = export_model(global_model, attribute_keys=MODEL_ATTRIBUTE_KEYS)
+    info(model_attributes)
 
     # The next steps are run until the maximum number of iterations or
     # convergence is reached
@@ -72,11 +181,11 @@ def master(
     loss_diff = 2*delta
     while (iteration < max_iter) and (loss_diff > delta):
         # The input for the partial algorithm
-        info('Defining input parameters')
+        info(f'######## ITERATION #{iteration} #########')
         input_ = {
             'method': 'logistic_regression_partial',
             'kwargs': {
-                'parameters': parameters,
+                'model_attributes': model_attributes,
                 'predictors': predictors,
                 'outcome': outcome
             }
@@ -84,35 +193,20 @@ def master(
 
         # Send partial task and collect results
         results = coordinate_task(client, input_, ids)
-        info(f'Results: {results}')
+        info(f'Results before aggregation: {results}')
 
-        # Average model weights with weighted average
-        info('Run global averaging for model weights')
-        coefficients = np.zeros((1, len(predictors)))
-        for i in range(coefficients.shape[1]):
-            coefficients[0, i] = np.sum([
-                result['model'].coef_[0, i]*result['size']
-                for result in results
-            ]) / np.sum([
-                result['size'] for result in results
-            ])
-        intercept = np.sum([
-            result['model'].intercept_*result['size'] for result in results
-        ]) / np.sum([
-            result['size'] for result in results
-        ])
-        intercept = np.array([intercept])
-
-        # Re-define the global parameters
-        parameters = (coefficients, intercept)
-        model = set_model_params(model, parameters)
+        # Aggregate the results
+        info("Aggregating partial modeling results")
+        global_model = aggregate(global_model, results=results, aggregation_keys=MODEL_AGGREGATION_KEYS)
+        info("Exporting global model")
+        global_model_attributes = export_model(model=global_model, attribute_keys=MODEL_ATTRIBUTE_KEYS)
 
         # The input for the partial algorithm that computes the loss
         info('Computing local losses')
         input_ = {
             'method': 'compute_loss_partial',
             'kwargs': {
-                'model': model,
+                'model_attributes': global_model_attributes,
                 'predictors': predictors,
                 'outcome': outcome
             }
@@ -141,36 +235,38 @@ def master(
         # Update iterations counter
         iteration += 1
 
-    # Final result
-    result = {
-        'model': model,
+    return {
+        'model_attributes': global_model_attributes,
         'loss': loss,
         'iteration': iteration
     }
 
-    return result
 
-
-def RPC_logistic_regression_partial(
-        df: pd.DataFrame, parameters, predictors, outcome
-) -> dict:
-    """ Partial method for federated logistic regression
+@data(1)
+def logistic_regression_partial(
+    df: pd.DataFrame, 
+    model_attributes: Dict[str, List[float]], 
+    predictors: List[str], 
+    outcome: str
+) -> Dict[str, any]:
+    """
+    Fits logistic regression model on local dataset.
 
     Parameters
     ----------
-    df
-        DataFrame with input data
-    parameters
-        Model weigths of logistic regression
-    predictors
-        List with columns to be used as predictors
-    outcome
-        Column to be used as outcome
+    df : pd.DataFrame
+        Local data frame.
+    model_attributes : Dict[str, List[float]]
+        Logistic regression model attributes (weights, intercepts).
+    predictors : List[str]
+        List of predictor variable names.
+    outcome : str
+        Outcome variable name.
 
     Returns
     -------
-    results
-        Dictionary with local model
+    Dict[str, any]
+        Attributes of locally trained logistic regression model and local dataset size.
     """
     # Drop rows with NaNs
     df = df.dropna(how='any')
@@ -179,49 +275,52 @@ def RPC_logistic_regression_partial(
     X = df[predictors].values
     y = df[outcome].values
 
-    # Create LogisticRegression Model
-    model = LogisticRegression(
+    # Create local LogisticRegression estimator object
+    model_kwargs = dict(
         max_iter=1,       # local epoch
         warm_start=True,  # prevent refreshing weights when fitting
     )
-
-    # Fitting local model
-    model = set_model_params(model, parameters)
+    model = initialize_model(LogisticRegression, model_attributes=model_attributes, **model_kwargs)
+    
     # Ignore convergence failure due to low local epochs
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         model.fit(X, y)
         info('Training round finished')
+    
+    model_attributes = export_model(model, attribute_keys=MODEL_ATTRIBUTE_KEYS)
 
-    # Results
-    results = {
-        'model': model,
+    return {
+        'model_attributes': model_attributes,
         'size': X.shape[0]
     }
 
-    return results
 
-
-def RPC_compute_loss_partial(
-        df: pd.DataFrame, model, predictors, outcome
-) -> dict:
-    """ Partial method for calculation of loss
+@data(1)
+def compute_loss_partial(
+    df: pd.DataFrame, 
+    model_attributes: Dict[str, list], 
+    predictors: List[str], 
+    outcome: str
+) -> Dict[str, Any]:
+    """
+    Computes logistic regression model loss on local dataset.
 
     Parameters
     ----------
-    df
-        DataFrame with input data
-    model
-        Logistic regression model object
-    predictors
-        List with columns to be used as predictors
-    outcome
-        Column to be used as outcome
+    df : pd.DataFrame
+        Local data frame.
+    model_attributes : Dict[str, list]
+        Attributes of the logistic regression model.
+    predictors : List[str]
+        Predictor variables.
+    outcome : str
+        Outcome variable.
 
     Returns
     -------
-    loss
-        Dictionary with local loss
+    Dict[str, Any]
+        Local loss and dataset size.
     """
     # Drop rows with NaNs
     df = df.dropna(how='any')
@@ -229,42 +328,47 @@ def RPC_compute_loss_partial(
     # Get features and outcomes
     X = df[predictors].values
     y = df[outcome].values
+
+    # Initialize local model instance
+    model = initialize_model(LogisticRegression, model_attributes)
 
     # Compute loss
     loss = log_loss(y, model.predict_proba(X))
 
-    # Results
-    results = {
+    return {
         'loss': loss,
         'size': X.shape[0]
     }
 
-    return results
 
-
-def RPC_run_validation(
-        df: pd.DataFrame, parameters: list, classes: list,
-        predictors: list, outcome: str
-) -> dict:
-    """ Method for running model validation
+@data(1)
+def run_validation(
+    df: pd.DataFrame, 
+    parameters: List[np.ndarray], 
+    classes: List[str], 
+    predictors: List[str], 
+    outcome: str
+) -> Dict[str, Any]:
+    """
+    Validates logistic regression model on local dataset.
 
     Parameters
     ----------
-    df
-        DataFrame with input data
-    parameters
-        List with coefficients
-    classes
-        Classes to be predicted
-    predictors
-        List with columns to be used as predictors
-    outcome
-        Column to be used as outcome
+    df : pd.DataFrame
+        Local data frame for validation.
+    parameters : List[np.ndarray]
+        Model parameters for validation.
+    classes : List[str]
+        List of class labels.
+    predictors : List[str]
+        Predictor variables for validation.
+    outcome : str
+        Outcome variable for validation.
 
     Returns
     -------
-    performance
-        Dictionary with performance metrics
+    Dict[str, Any]
+        Performance metrics including model accuracy and confusion matrix.
     """
     # Drop rows with NaNs
     df = df.dropna(how='any')
@@ -273,24 +377,23 @@ def RPC_run_validation(
     X = df[predictors].values
     y = df[outcome].values
 
-    # Logistic regression model
-    model = LogisticRegression()
-    model.coef_ = np.array(parameters[1])
-    model.intercept_ = np.array(parameters[0])
-    model.classes_ = np.array(classes)
+    # Initialize LogisticRegression estimator
+    model_attributes=dict(
+            intercept_ = np.array(parameters[0]),
+            coef_ = np.array(parameters[1]),
+            classes_ = np.array(classes)
+            )
+    model = initialize_model(LogisticRegression, model_attributes)
 
     # Compute model accuracy
     score = model.score(X, y)
 
-    # Confusion matrix
-    cm = confusion_matrix(
+    # Compute confusion matrix
+    confusion_matrix_ = confusion_matrix(
         y, model.predict(X), labels=model.classes_
-    )
+    ).tolist()
 
-    # Results
-    results = {
+    return {
         'score': score,
-        'confusion_matrix': cm
+        'confusion_matrix': confusion_matrix_
     }
-
-    return results
