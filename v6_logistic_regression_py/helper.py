@@ -151,3 +151,12 @@ def to_json_serializable(item: Union[np.ndarray, dict, Any]) -> Union[list, dict
     if isinstance(item, dict):
         return {key: to_json_serializable(value) for key, value in item.items()}
     return item
+
+def trash_outcomes(
+        df,
+        outcome,
+        survival_column="Survival.time",
+        event_column="deadstatus.event",
+        threshold=730):
+    df[outcome] = (df[survival_column] <= threshold).astype(int)
+    return df 
