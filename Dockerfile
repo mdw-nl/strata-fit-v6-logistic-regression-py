@@ -3,7 +3,7 @@ FROM harbor2.vantage6.ai/infrastructure/algorithm-base:4.2
 
 # Change this to the package name of your project. This needs to be the same
 # as what you specified for the name in the `setup.py`.
-ARG PKG_NAME="v6-logistic-regression-py"
+ARG PKG_NAME="v6_logistic_regression_py"
 
 # This will install your algorithm into this image.
 COPY . /app

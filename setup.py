@@ -16,7 +16,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 # Setup the package
 setup(
-    name='v6-logistic-regression-py',
+    name='v6_logistic_regression_py',
     version='1.0.0',
     description='Vantage6 algorithm for logistic regression',
     long_description=long_description,
