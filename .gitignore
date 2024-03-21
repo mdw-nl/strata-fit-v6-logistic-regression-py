@@ -105,6 +105,7 @@ venv.bak/
 
 .vscode/
 .idea/
+.DS_Store
 
 # Image repositories
 docker_hub.sh
