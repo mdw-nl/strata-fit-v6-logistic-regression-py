@@ -32,7 +32,7 @@ master_task = client.task.create(
             'predictors': ['t', 'n', 'm'],
             'outcome': 'vital_status',
             'classes': ['alive', 'dead'],
-            'max_iter': 10,
+            'max_iter': 100,
             'delta': 0.0001
         }
     },
