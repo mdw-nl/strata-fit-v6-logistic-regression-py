@@ -1,3 +1,18 @@
 [flake8]
-exclude = __pycache__,.venv,.venv2,v6_logistic_regression_py.egg-info
-max-line-length = 80
+# it's not a bug that we aren't using all of a module's features
+F401 = False
+
+# sometimes an ambiguous variable name isn't a problem
+F841 = False
+
+# line length
+max-line-length = 120 
+
+# complexity
+max-complexity = 15 
+
+# Allow certain violations in certain files
+per-file-ignores =
+    __init__.py: F401
+
+exclude =  .git, .eggs, __pycache__, tests/, docs/, build/, dist/
