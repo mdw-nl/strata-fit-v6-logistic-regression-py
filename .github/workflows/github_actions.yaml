@@ -6,8 +6,9 @@ on:
     branches:    
       - main
       - 'release/**'
+      - 'experiment/**'
   pull_request:
-    branches: [ main ]
+    branches: [ main , 'experiment/**']
 
 
 env:
@@ -30,8 +31,9 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8
       run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # stop the build if not following PEP8 guidelines
-        flake8 .
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
   containerize:
 
