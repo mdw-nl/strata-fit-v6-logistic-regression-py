@@ -5,11 +5,14 @@ on:
     # Sequence of patterns matched against refs/heads
     branches:    
       - main
-      - 'release/**'
       - 'experiment/**'
+      - 'legacy/**'
+      - 'release/**'
   pull_request:
-    branches: [ main , 'experiment/**']
-
+    branches:
+      - main
+      - 'experiment/**'
+      - 'legacy/**'
 
 env:
   REGISTRY: ghcr.io
