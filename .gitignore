@@ -114,3 +114,6 @@ docker_hub.sh
 v6_kmeans_py/local/input
 v6_kmeans_py/local/output
 v6_kmeans_py/local/token
+
+.psi-ignore
+report.md
